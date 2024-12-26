@@ -26,20 +26,51 @@ Avant de commencer, assurez-vous d'avoir les éléments suivants :
 ## Installation
 
 1. Clonez ce dépôt :
+
    ```bash
    git clone https://github.com/ton-utilisateur/random-balance-test.git
    cd random-balance-test
-   
+
+   ```
+
 2. Compilez le projet avec GCC ou un autre compilateur compatible :
 
+```bash
 make
+```
 
 3. Sur chaque machine, lancez le programme correspondant (serveur ou client).
 
 Lancer le serveur (Machine 1) :
- ./random_balance_test_server
+```bash
+./random_balance_test_server
+```
+
+
 Lancer le client (Machine 2) :
- ./random_balance_test_client
+```bash
+./random_balance_test_client
+```
+
+Structure du projet
+Le projet est organisé comme suit :
+
+```bash
+random-balance-test/
+├── README.md          # Ce fichier
+├── src/               # Code source
+│   ├── main.c         # Programme principal pour générer et envoyer des nombres
+│   ├── generator.c    # Code pour générer les nombres
+│   ├── generator.h    # Header pour le générateur de nombres
+│   ├── server.c       # Code pour le serveur qui reçoit et traite les données
+│   └── server.h       # Header pour le serveur
+├── data/              # Dossier pour stocker les résultats ou fichiers de test
+│   └── results.txt    # Résultats ou fichiers de logs générés
+└── Makefile           # Fichier pour construire le projet
+```
+
+
+
 Le serveur et le client échangeront les données via des sockets pour effectuer le test. Le programme génère et analyse 1 milliard de valeurs aléatoires, puis compare leur répartition pour évaluer l'équilibre de la fonction rand().
 
 Résultats attendus
@@ -47,4 +78,3 @@ Après avoir exécuté le programme, les résultats seront stockés dans un fich
 
 Contribuer
 Les contributions sont les bienvenues ! Si tu souhaites contribuer, ouvre une pull request ou signale des problèmes via les issues.
-
