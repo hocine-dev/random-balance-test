@@ -41,19 +41,6 @@ Lancer le serveur (Machine 1) :
 Lancer le client (Machine 2) :
  ./random_balance_test_client
 Le serveur et le client échangeront les données via des sockets pour effectuer le test. Le programme génère et analyse 1 milliard de valeurs aléatoires, puis compare leur répartition pour évaluer l'équilibre de la fonction rand().
-Structure du projet
-Le projet est organisé comme suit :
-random-balance-test/
-├── README.md          # Ce fichier
-├── src/               # Code source
-│   ├── main.cpp       # Programme principal pour générer et envoyer des nombres
-│   ├── generator.cpp  # Code pour générer les nombres
-│   ├── generator.h    # Header pour le générateur de nombres
-│   ├── server.cpp     # Code pour le serveur qui reçoit et traite les données
-│   └── server.h       # Header pour le serveur
-├── data/              # Dossier pour stocker les résultats ou fichiers de test
-│   └── results.txt    # Résultats ou fichiers de logs générés
-└── Makefile           # Fichier pour construire le projet
 
 Résultats attendus
 Après avoir exécuté le programme, les résultats seront stockés dans un fichier log ou affichés à l'écran. Les valeurs doivent être réparties de manière relativement uniforme dans l'intervalle de 1 à 1 milliard. Toute distribution irrégulière pourrait indiquer un problème avec la fonction rand().
