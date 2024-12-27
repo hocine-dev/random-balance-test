@@ -2,9 +2,9 @@
 
 ## Description
 
-Le projet **Random Balance Test** a pour objectif de tester l'équilibre des valeurs générées par la fonction `rand()` en C dans un intervalle de 1 à 1 milliard. En générant 1 milliard de nombres aléatoires, nous vérifions si ces valeurs sont uniformément réparties, afin d'évaluer l'efficacité de la fonction `rand()` dans un grand intervalle.
+Le projet **Random Balance Test** a pour objectif de tester l'équilibre des valeurs générées par la fonction `rand()` en C dans un intervalle de 1 à 1 milliard. En générant 120 milliard de nombres aléatoires, nous vérifions si ces valeurs sont uniformément réparties, afin d'évaluer l'efficacité de la fonction `rand()` dans un grand intervalle.
 
-Le projet utilise deux ordinateurs en parallèle, communiquant via des **sockets** et exécutant des tâches en **multithreading** pour optimiser l'exécution et rendre le test plus représentatif.
+Le projet utilise deux ordinateurs en parallèle, communiquant via des **sockets**  pour optimiser l'exécution et rendre le test plus représentatif.
 
 ## But du projet
 
@@ -12,7 +12,7 @@ L'objectif principal de ce projet est de :
 
 - Tester l'équilibre des valeurs générées par la fonction `rand()` sur un large intervalle [1, 1 milliard].
 - Exécuter le test sur deux machines via des **sockets** pour améliorer la précision et réduire le temps d'exécution.
-- Utiliser **le multithreading** pour répartir les tâches de génération de nombres entre plusieurs threads afin de maximiser les performances.
+-  répartir les tâches de génération, afin de maximiser les performances.
 
 ## Prérequis
 
@@ -21,7 +21,7 @@ Avant de commencer, assurez-vous d'avoir les éléments suivants :
 - Un compilateur C/C++ (ex. GCC).
 - Une machine avec un système d'exploitation compatible pour exécuter des programmes en C.
 - Une connexion réseau entre deux ordinateurs pour la communication via des **sockets**.
-- La bibliothèque **pthread** pour le multithreading.
+
 
 ## Installation
 
