@@ -8,8 +8,6 @@
 #include <netinet/in.h>
 #include <string.h>
 #include <time.h>
-#include "server.h"
-#include "client.h" // Inclusion du fichier d'en-tête du client pour les fonctions partagées
 
 #define NOMBRE_FILS 6              // Nombre de processus à créer
 #define NOMBRE_VALEURS 60000000000 // Nombre total de valeurs générées par le serveur (60 milliards)

@@ -9,7 +9,6 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <time.h>
-#include "client.h"
 
 #define NOMBRE_FILS 6              // Nombre de processus à créer
 #define NOMBRE_VALEURS 60000000000 // Nombre total de valeurs générées par le client (60 milliards)
@@ -135,4 +134,15 @@ void executer_client() {
     shmdt(memoire_partagee); // Détacher la mémoire partagée
     shmctl(memoire_id, IPC_RMID, NULL); // Supprimer la mémoire partagée
     semctl(semaphore, 0, IPC_RMID); // Supprimer le sémaphore
+}
+
+int main() {
+    printf("Début du client Random Balance Test.\n");
+
+    // Exécuter la logique côté client
+    printf("Exécution du client...\n");
+    executer_client();
+
+    printf("Fin du client Random Balance Test.\n");
+    return 0;
 }
