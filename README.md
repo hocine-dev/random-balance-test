@@ -59,11 +59,8 @@ Le projet est organisé comme suit :
 random-balance-test/
 ├── README.md          # Ce fichier
 ├── src/               # Code source
-│   ├── main.c         # Programme principal pour générer et envoyer des nombres
-│   ├── generator.c    # Code pour générer les nombres
-│   ├── generator.h    # Header pour le générateur de nombres
+│   ├── client.c    # Code pour générer les nombres
 │   ├── server.c       # Code pour le serveur qui reçoit et traite les données
-│   └── server.h       # Header pour le serveur
 ├── data/              # Dossier pour stocker les résultats ou fichiers de test
 │   └── results.txt    # Résultats ou fichiers de logs générés
 └── Makefile           # Fichier pour construire le projet
