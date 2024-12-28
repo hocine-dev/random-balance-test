@@ -1,148 +1,298 @@
 #include <stdio.h>
+
 #include <stdlib.h>
+
 #include <unistd.h>
-#include <sys/shm.h>
-#include <sys/sem.h>
-#include <sys/wait.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+
 #include <string.h>
+
+#include <sys/socket.h>
+
+#include <arpa/inet.h>
+
+#include <sys/shm.h>
+
+#include <sys/sem.h>
+
 #include <time.h>
 
-#define NOMBRE_FILS 6              // Nombre de processus à créer
-#define NOMBRE_VALEURS 60000000000 // Nombre total de valeurs générées par le client (60 milliards)
-#define TAILLE_MEMOIRE 1000000     // Taille de chaque segment de mémoire partagée
-#define CLE_MEMOIRE 1234           // Clé pour la mémoire partagée
-#define CLE_SEMAPHORE 5678         // Clé pour le sémaphore
-#define PORT_SERVEUR 8080          // Port utilisé pour communiquer avec le serveur
-#define IP_SERVEUR "127.0.0.1"     // Adresse IP du serveur
+#include <sys/wait.h>
 
-// Structure pour encapsuler les sémaphores
-int initialiser_semaphore(int cle) {
-    int semaphore = semget(cle, 1, IPC_CREAT | 0666);
-    if (semaphore < 0) {
-        perror("Erreur lors de la création du sémaphore");
-        exit(1);
+
+
+#define NOMBRE_DE_PROCESSUS 6
+
+#define SERVER_IP "10.0.2.15"
+
+#define PORT 12345
+
+#define MEM_KEY 12345   // Clé de la mémoire partagée
+
+#define SEM_KEY 12346   // Clé du sémaphore
+
+
+
+// Structure pour la mémoire partagée
+
+struct shared_data {
+
+    int values[NOMBRE_DE_PROCESSUS];
+
+};
+
+
+
+// Fonction pour initialiser le sémaphore
+
+void init_semaphore(int sem_id) {
+
+    for (int i = 0; i < NOMBRE_DE_PROCESSUS; i++) {
+
+        semctl(sem_id, i, SETVAL, 1); // Initialisation à 1 (sémaphore disponible)
+
     }
-    semctl(semaphore, 0, SETVAL, 1); // Initialiser à 1
-    return semaphore;
+
 }
 
-// Fonction pour verrouiller (P)
-void verrouiller_semaphore(int semaphore) {
-    struct sembuf operation = {0, -1, 0};
-    semop(semaphore, &operation, 1);
+
+
+// Fonction pour manipuler un sémaphore
+
+void P(int sem_id, int index) {
+
+    struct sembuf sem_op = { index, -1, 0 }; // P (down) operation
+
+    semop(sem_id, &sem_op, 1);
+
 }
 
-// Fonction pour déverrouiller (V)
-void deverrouiller_semaphore(int semaphore) {
-    struct sembuf operation = {0, 1, 0};
-    semop(semaphore, &operation, 1);
+
+
+void V(int sem_id, int index) {
+
+    struct sembuf sem_op = { index, 1, 0 }; // V (up) operation
+
+    semop(sem_id, &sem_op, 1);
+
 }
 
-// Fonction pour générer des valeurs aléatoires
-void generer_valeurs(int *memoire_partagee, int semaphore, long debut, long fin) {
-    srand(time(NULL) + getpid()); // Graine unique par processus
-    for (long i = debut; i < fin; i++) {
-        int valeur_aleatoire = rand() % 1000000000 + 1;
 
-        // Accès protégé à la mémoire partagée
-        verrouiller_semaphore(semaphore);
-        memoire_partagee[i % TAILLE_MEMOIRE] = valeur_aleatoire; // Stocker dans la mémoire partagée
-        deverrouiller_semaphore(semaphore);
-    }
-}
-
-// Fonction pour envoyer des données au serveur via un socket
-void envoyer_donnees_serveur(int *memoire_partagee) {
-    int socket_client;
-    struct sockaddr_in adresse_serveur;
-
-    // Créer un socket
-    if ((socket_client = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("Erreur lors de la création du socket");
-        exit(1);
-    }
-
-    // Configurer l'adresse du serveur
-    adresse_serveur.sin_family = AF_INET;
-    adresse_serveur.sin_port = htons(PORT_SERVEUR);
-    adresse_serveur.sin_addr.s_addr = inet_addr(IP_SERVEUR);
-
-    // Se connecter au serveur
-    if (connect(socket_client, (struct sockaddr *)&adresse_serveur, sizeof(adresse_serveur)) < 0) {
-        perror("Erreur lors de la connexion au serveur");
-        exit(1);
-    }
-
-    // Envoyer les données de la mémoire partagée au serveur
-    if (send(socket_client, memoire_partagee, TAILLE_MEMOIRE * sizeof(int), 0) < 0) {
-        perror("Erreur lors de l'envoi des données au serveur");
-        exit(1);
-    }
-
-    printf("Données envoyées au serveur.\n");
-    close(socket_client); // Fermer la connexion
-}
-
-void executer_client() {
-    int memoire_id, semaphore;
-    int *memoire_partagee;
-    pid_t fils[NOMBRE_FILS];
-    long taille_par_fils = NOMBRE_VALEURS / NOMBRE_FILS;
-
-    // Création de la mémoire partagée
-    memoire_id = shmget(CLE_MEMOIRE, TAILLE_MEMOIRE * sizeof(int), IPC_CREAT | 0666);
-    if (memoire_id < 0) {
-        perror("Erreur lors de la création de la mémoire partagée");
-        exit(1);
-    }
-
-    // Attachement à la mémoire partagée
-    memoire_partagee = (int *)shmat(memoire_id, NULL, 0);
-    if (memoire_partagee == (int *)-1) {
-        perror("Erreur lors de l'attachement à la mémoire partagée");
-        exit(1);
-    }
-
-    // Initialisation du sémaphore
-    semaphore = initialiser_semaphore(CLE_SEMAPHORE);
-
-    // Création des processus fils
-    for (int i = 0; i < NOMBRE_FILS; i++) {
-        long debut = i * taille_par_fils;
-        long fin = (i == NOMBRE_FILS - 1) ? NOMBRE_VALEURS : debut + taille_par_fils;
-
-        if ((fils[i] = fork()) == 0) {
-            // Code du fils
-            generer_valeurs(memoire_partagee, semaphore, debut, fin);
-            envoyer_donnees_serveur(memoire_partagee); // Envoyer les données au serveur
-            shmdt(memoire_partagee); // Détacher la mémoire partagée
-            exit(0);
-        }
-    }
-
-    // Attendre que tous les fils terminent
-    for (int i = 0; i < NOMBRE_FILS; i++) {
-        waitpid(fils[i], NULL, 0);
-    }
-
-    printf("Client : Toutes les valeurs ont été générées et envoyées au serveur.\n");
-
-    // Nettoyage
-    shmdt(memoire_partagee); // Détacher la mémoire partagée
-    shmctl(memoire_id, IPC_RMID, NULL); // Supprimer la mémoire partagée
-    semctl(semaphore, 0, IPC_RMID); // Supprimer le sémaphore
-}
 
 int main() {
-    printf("Début du client Random Balance Test.\n");
 
-    // Exécuter la logique côté client
-    printf("Exécution du client...\n");
-    executer_client();
+    pid_t pid;
 
-    printf("Fin du client Random Balance Test.\n");
+    int sock;
+
+    struct sockaddr_in server_addr;
+
+
+
+    // Création du socket
+
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+
+        perror("Échec de la création du socket");
+
+        exit(1);
+
+    }
+
+
+
+    // Configuration de l'adresse du serveur
+
+    server_addr.sin_family = AF_INET;
+
+    server_addr.sin_port = htons(PORT);
+
+    if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0) {
+
+        perror("Adresse IP invalide");
+
+        exit(1);
+
+    }
+
+
+
+    // Connexion au serveur
+
+    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+
+        perror("Échec de la connexion au serveur");
+
+        exit(1);
+
+    }
+
+
+
+    // Création de la mémoire partagée
+
+    int shmid;
+
+    struct shared_data *shm_data;
+
+    if ((shmid = shmget(MEM_KEY, sizeof(struct shared_data), IPC_CREAT | 0666)) < 0) {
+
+        perror("Erreur de création de la mémoire partagée");
+
+        exit(1);
+
+    }
+
+
+
+    // Attachement de la mémoire partagée
+
+    if ((shm_data = (struct shared_data *)shmat(shmid, NULL, 0)) == (void *)-1) {
+
+        perror("Erreur d'attachement de la mémoire partagée");
+
+        exit(1);
+
+    }
+
+
+
+    // Création du sémaphore
+
+    int semid;
+
+    if ((semid = semget(SEM_KEY, NOMBRE_DE_PROCESSUS, IPC_CREAT | 0666)) < 0) {
+
+        perror("Erreur de création du sémaphore");
+
+        exit(1);
+
+    }
+
+
+
+    // Initialisation du sémaphore
+
+    init_semaphore(semid);
+
+
+
+    // Création des processus enfants
+
+    for (int i = 0; i < NOMBRE_DE_PROCESSUS; i++) {
+
+        pid = fork();
+
+        if (pid < 0) {
+
+            perror("Échec de la création du processus");
+
+            exit(1);
+
+        } else if (pid == 0) {
+
+            // Processus enfant
+
+
+
+            // Initialisation du générateur de nombres aléatoires avec une graine spécifique
+
+            srand(time(NULL) + getpid());
+
+
+
+            // Génération de la valeur aléatoire
+
+            int valeur_aleatoire = rand() % 100;  // Valeur entre 0 et 99
+
+
+
+            // Attente avant d'accéder à la mémoire partagée
+
+            P(semid, i);  // Acquérir le sémaphore
+
+
+
+            // Stockage de la valeur générée dans la mémoire partagée
+
+            shm_data->values[i] = valeur_aleatoire;
+
+
+
+            // Libération du sémaphore
+
+            V(semid, i);  // Libérer le sémaphore
+
+
+
+            // Envoi de la valeur au serveur
+
+            char buffer[256];
+
+            snprintf(buffer, sizeof(buffer), "%d", valeur_aleatoire);
+
+            if (send(sock, buffer, strlen(buffer), 0) == -1) {
+
+                perror("Échec de l'envoi de la valeur");
+
+                exit(1);
+
+            }
+
+
+
+            printf("Processus enfant %d (PID: %d) a généré et envoyé la valeur : %d\n", i, getpid(), valeur_aleatoire);
+
+
+
+            // Attente de 1 seconde avant le prochain envoi
+
+            sleep(1);
+
+
+
+            exit(0);
+
+        }
+
+    }
+
+
+
+    // Attente de la fin des processus enfants
+
+    for (int i = 0; i < NOMBRE_DE_PROCESSUS; i++) {
+
+        wait(NULL);
+
+    }
+
+
+
+    // Affichage des valeurs générées par les processus enfants
+
+    printf("Valeurs générées par les processus enfants (mémoire partagée) :\n");
+
+    for (int i = 0; i < NOMBRE_DE_PROCESSUS; i++) {
+
+        printf("Valeur générée par l'enfant %d : %d\n", i, shm_data->values[i]);
+
+    }
+
+
+
+    // Fermeture des sockets et nettoyage
+
+    close(sock);
+
+    shmdt(shm_data);
+
+    shmctl(shmid, IPC_RMID, NULL);
+
+    semctl(semid, 0, IPC_RMID);
+
+
+
     return 0;
+
 }
+
