@@ -34,6 +34,10 @@
 
 #define NVPF  (0.01 * MILLIARD)  // Nombre totale de valeurs a generé par les processus fils
 
+#define CHUNKSIZE 5000  // Taille de chaque chunk
+
+#define NUM_CHUNKS (MAX_RAND / CHUNKSIZE)  // Nombre de chunks
+
 
 
 // Générateur Linéaire Congruent (GLC)
@@ -128,9 +132,21 @@ int main() {
 
 
 
-    sem_t *sem = sem_open("semaphore", O_CREAT | O_EXCL, 0644, 1);
+    // Création des sémaphores pour chaque chunk
 
-    sem_unlink("semaphore");
+    sem_t *sem_chunks[NUM_CHUNKS];
+
+    for (int i = 0; i < NUM_CHUNKS; i++) {
+
+        char sem_name[20];
+
+        snprintf(sem_name, sizeof(sem_name), "semaphore_chunk_%d", i);
+
+        sem_chunks[i] = sem_open(sem_name, O_CREAT | O_EXCL, 0644, 1);
+
+        sem_unlink(sem_name);  // Unlink après création pour éviter les conflits
+
+    }
 
 
 
@@ -140,59 +156,73 @@ int main() {
 
     // Création des processus enfants du serveur pour générer des données
 
-  for (int i = 0; i < MAX_FILS; i++) {
+    for (int i = 0; i < MAX_FILS; i++) {
 
-    if (fork() == 0) {
+        if (fork() == 0) {
 
-        printf("[Processus Serveur %d] Génération des nombres aléatoires...\n", i + 1);
-
-
-
-        // Initialisation de la graine pour rand() avec srand
-
-        srand(time(NULL) + getpid());  // Utilisation de time(NULL) et getpid() pour garantir une graine unique par processus
+            printf("[Processus Serveur %d] Génération des nombres aléatoires...\n", i + 1);
 
 
 
-        int *tab_local = calloc(MAX_RAND, sizeof(int));
+            // Initialisation de la graine pour rand() avec srand
+
+            srand(time(NULL) + getpid());  // Utilisation de time(NULL) et getpid() pour garantir une graine unique par processus
 
 
 
-        for (int j = 0; j < NVPF; j++) {
+            int *tab_local = calloc(MAX_RAND, sizeof(int));
 
-            unsigned int random_value = rand() % MAX_RAND;  // Utilisation de rand() pour générer un nombre aléatoire
 
-            tab_local[random_value]++;
+
+            for (int j = 0; j < NVPF; j++) {
+
+                unsigned int random_value = rand() % MAX_RAND;  // Utilisation de rand() pour générer un nombre aléatoire
+
+                tab_local[random_value]++;
+
+            }
+
+
+
+            // Gestion de la fusion des chunks
+
+            for (int chunk = 0; chunk < NUM_CHUNKS; chunk++) {
+
+                // Attente du sémaphore du chunk
+
+                sem_wait(sem_chunks[chunk]);
+
+
+
+                // Fusion du chunk
+
+                for (int k = chunk * CHUNKSIZE; k < (chunk + 1) * CHUNKSIZE && k < MAX_RAND; k++) {
+
+                    tab_global[k] += tab_local[k];
+
+                }
+
+
+
+                // Libération du sémaphore du chunk
+
+                sem_post(sem_chunks[chunk]);
+
+            }
+
+
+
+            printf("[Processus Serveur %d] Fusion terminée.\n", i + 1);
+
+            free(tab_local);
+
+            munmap(tab_global, MAX_RAND * sizeof(int));
+
+            exit(0);
 
         }
-
-
-
-        sem_wait(sem);
-
-        for (int k = 0; k < MAX_RAND; k++) {
-
-            tab_global[k] += tab_local[k];
-
-        }
-
-        sem_post(sem);
-
-
-
-        printf("[Processus Serveur %d] Fusion terminée.\n", i + 1);
-
-        free(tab_local);
-
-        munmap(tab_global, MAX_RAND * sizeof(int));
-
-        exit(0);
 
     }
-
-}
-
-
 
 
 
@@ -286,7 +316,7 @@ int main() {
 
         printf("[Serveur] Fusion des données du client avec le tableau global...\n");
 
-        sem_wait(sem);
+        sem_wait(sem_chunks[0]);  // Attente du sémaphore du premier chunk
 
         for (int i = 0; i < MAX_RAND; i++) {
 
@@ -294,7 +324,9 @@ int main() {
 
         }
 
-        sem_post(sem);
+        sem_post(sem_chunks[0]);  // Libération du sémaphore du premier chunk
+
+
 
         printf("[Serveur] Fusion terminée.\n");
 
@@ -331,3 +363,4 @@ int main() {
     return 0;
 
 }
+
