@@ -33,17 +33,17 @@ Avant de commencer, assurez-vous d'avoir les éléments suivants :
 2.Compilez le projet avec GCC ou un autre compilateur compatible :
  ```bash
     make
-Sur chaque machine, lancez le programme correspondant (serveur ou client).
+3.Sur chaque machine, lancez le programme correspondant (serveur ou client).
 
-Lancer le serveur (Machine 1) :
+3.1.Lancer le serveur (Machine 1) :
  ```bash
 ./server_program
 
-Lancer le client (Machine 2) :
+3.2.Lancer le client (Machine 2) :
  ```bash
 ./client_program
 
-Structure du projet
+4.Structure du projet
 Le projet est organisé comme suit :
 random-balance-test/
 ├── .gitignore
@@ -56,7 +56,7 @@ random-balance-test/
 │   ├── client.c
 │   └── server.c
 
-Utilisation
+5.Utilisation
 Serveur : Le serveur génère des nombres aléatoires et les stocke dans un tableau partagé. Il attend ensuite les données du client pour les fusionner et calculer le coefficient de variation.
 
 Client : Le client génère également des nombres aléatoires, les stocke dans un tableau partagé, puis envoie ces données au serveur.
@@ -65,11 +65,11 @@ Communication : Les deux programmes communiquent via des sockets pour échanger 
 
 Évaluation : Le serveur calcule le coefficient de variation des valeurs combinées pour déterminer si la distribution est équilibrée.
 
-Résultats attendus
+6.Résultats attendus
 Après avoir exécuté le programme, les résultats seront affichés à l'écran. Les valeurs doivent être réparties de manière relativement uniforme dans l'intervalle de 1 à 1 milliard. Toute distribution irrégulière pourrait indiquer un problème avec la fonction rand().
 
-Contribuer
+7.Contribuer
 Les contributions sont les bienvenues ! Si vous souhaitez contribuer, ouvrez une pull request ou signalez des problèmes via les issues.
 
-Licence
+8.Licence
 Ce projet est sous licence MIT. Voir le fichier LICENSE pour plus de détails.
