@@ -2,253 +2,97 @@
 
 #include <stdlib.h>
 
-#include <unistd.h>
-
 #include <string.h>
 
-#include <sys/socket.h>
+#include <unistd.h>
 
 #include <arpa/inet.h>
 
-#include <pthread.h>
+#include <sys/wait.h>
+
+#include <sys/mman.h>
+
+#include <semaphore.h>
+
+#include <fcntl.h>
+
+#include <math.h>
 
 #include <time.h>
 
-#include <sys/wait.h>
+
+
+#define PORT 8080
+
+#define MAX_RAND 32767
+
+#define MAX_FILS 6  // Nombre de processus enfants du serveur
+
+#define MILLIARD 1000000000LL
+
+#define NOMBRE_DE_VALEURS (600 * MILLIARD)  // Nombre totale de valeurs a generé
+
+#define NVPF  (0.01 * MILLIARD)  // Nombre totale de valeurs a generé par les processus fils
 
 
 
-#define PORT 12345
+// Générateur Linéaire Congruent (GLC)
 
-#define NOMBRE_DE_PROCESSUS 6
+unsigned int glc(unsigned int seed) {
 
-#define BUFFER_SIZE 256
+    static unsigned int a = 1664525, c = 1013904223, m = 0xFFFFFFFF;
 
-
-
-// Structure pour stocker les valeurs générées et reçues
-
-typedef struct {
-
-    int valeurs_generees[NOMBRE_DE_PROCESSUS];
-
-    int valeurs_reçues[NOMBRE_DE_PROCESSUS];
-
-    pthread_mutex_t mutex;
-
-} serveur_data;
-
-
-
-serveur_data data;
-
-
-
-// Fonction pour générer une valeur aléatoire
-
-void *generation_valeurs(void *arg) {
-
-    srand(time(NULL) + getpid());  // Initialiser la graine de manière unique
-
-
-
-    for (int i = 0; i < NOMBRE_DE_PROCESSUS; i++) {
-
-        int valeur = rand() % 100;  // Générer une valeur aléatoire
-
-        pthread_mutex_lock(&data.mutex);  // Verrouiller l'accès aux données partagées
-
-        data.valeurs_generees[i] = valeur;
-
-        pthread_mutex_unlock(&data.mutex);  // Déverrouiller l'accès aux données partagées
-
-
-
-        printf("Serveur (PID: %d) a généré la valeur : %d\n", getpid(), valeur);
-
-        sleep(1);  // Attendre une seconde avant de générer la suivante
-
-    }
-
-
-
-    return NULL;
+    return (a * seed + c) % m;
 
 }
 
 
 
-// Fonction pour recevoir les données du client
+void coef_variation(int *tab) {
 
-void *recevoir_donnees(void *arg) {
+    long double somme = 0.0;
 
-    int server_fd, client_fd;
+    double moyenne = 0.0;
 
-    struct sockaddr_in server_addr, client_addr;
-
-    socklen_t addr_len = sizeof(client_addr);
-
-    char buffer[BUFFER_SIZE];
+    float variance = 0.0, ecart_type = 0.0, coef_variation = 0.0;
 
 
 
-    // Création du socket
+    for (int i = 0; i < MAX_RAND; i++) {
 
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-
-        perror("Échec de la création du socket");
-
-        exit(1);
+        somme += tab[i];
 
     }
 
-
-
-    // Configuration de l'adresse du serveur
-
-    server_addr.sin_family = AF_INET;
-
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-
-    server_addr.sin_port = htons(PORT);
+    moyenne = somme / MAX_RAND;
 
 
 
-    // Lier le socket à l'adresse
+    for (int i = 0; i < MAX_RAND; i++) {
 
-    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-
-        perror("Échec du binding");
-
-        exit(1);
+        variance += (tab[i] - moyenne) * (tab[i] - moyenne);
 
     }
 
+    variance /= MAX_RAND;
 
+    ecart_type = sqrt(variance);
 
-    // Mise en écoute du serveur
-
-    if (listen(server_fd, 5) < 0) {
-
-        perror("Erreur d'écoute");
-
-        exit(1);
-
-    }
+    coef_variation = ecart_type / moyenne;
 
 
 
-    printf("Serveur en attente de connexion...\n");
+    printf("[Serveur] Coefficient de variation final : %f\n", coef_variation);
 
+    if (coef_variation < 0.05) {
 
+        printf("[Serveur] La distribution est équilibrée.\n");
 
-    // Attente d'une connexion client
+    } else {
 
-    if ((client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addr_len)) < 0) {
-
-        perror("Erreur d'acceptation");
-
-        exit(1);
+        printf("[Serveur] La distribution n'est pas équilibrée.\n");
 
     }
-
-
-
-    printf("Client connecté, en attente des données...\n");
-
-
-
-    // Attendre que le client envoie une demande pour générer des valeurs
-
-    while (1) {
-
-        memset(buffer, 0, sizeof(buffer));  // Nettoyage du buffer
-
-        int n = recv(client_fd, buffer, sizeof(buffer) - 1, 0);  // Recevoir les données
-
-        if (n <= 0) {
-
-            if (n == 0) {
-
-                printf("Connexion fermée par le client\n");
-
-            } else {
-
-                perror("Erreur de réception");
-
-            }
-
-            break;  // Sortir de la boucle si la connexion est fermée ou une erreur se produit
-
-        }
-
-
-
-        // Affichage du message reçu
-
-        printf("Message reçu du client : %s\n", buffer);
-
-
-
-        // Vérifier si le client a envoyé la commande pour commencer la génération
-
-        if (strcmp(buffer, "generer") == 0) {
-
-            // Lancer le thread pour générer les valeurs
-
-            pthread_t thread_generation;
-
-            if (pthread_create(&thread_generation, NULL, generation_valeurs, NULL) != 0) {
-
-                perror("Erreur lors de la création du thread de génération");
-
-                exit(1);
-
-            }
-
-
-
-            // Attendre que le thread de génération se termine
-
-            pthread_join(thread_generation, NULL);
-
-        }
-
-
-
-        // Sauvegarder la valeur reçue dans la structure partagée
-
-        pthread_mutex_lock(&data.mutex);
-
-        int index = 0;
-
-        while (index < NOMBRE_DE_PROCESSUS && data.valeurs_reçues[index] != 0) {
-
-            index++;
-
-        }
-
-        data.valeurs_reçues[index] = atoi(buffer);  // Convertir la chaîne en entier
-
-        pthread_mutex_unlock(&data.mutex);
-
-
-
-        // Affichage de la valeur reçue
-
-        printf("Valeur reçue du client : %s\n", buffer);
-
-    }
-
-
-
-    // Fermeture des sockets
-
-    close(client_fd);
-
-    close(server_fd);
-
-    return NULL;
 
 }
 
@@ -256,79 +100,234 @@ void *recevoir_donnees(void *arg) {
 
 int main() {
 
-    pthread_t thread_reception;
+    printf("[Serveur] Démarrage du serveur...\n");
 
 
 
-    // Initialisation du mutex
+    int server_fd, new_socket;
 
-    pthread_mutex_init(&data.mutex, NULL);
+    struct sockaddr_in address;
 
-
-
-    // Initialiser les tableaux avec des valeurs par défaut
-
-    memset(data.valeurs_generees, 0, sizeof(data.valeurs_generees));
-
-    memset(data.valeurs_reçues, 0, sizeof(data.valeurs_reçues));
+    int addrlen = sizeof(address);
 
 
 
-    // Lancer un thread pour recevoir les données des clients
+    // Création du tableau global partagé avec mmap
 
-    if (pthread_create(&thread_reception, NULL, recevoir_donnees, NULL) != 0) {
+    int *tab_global = mmap(NULL, MAX_RAND * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
-        perror("Erreur lors de la création du thread de réception");
+    if (tab_global == MAP_FAILED) {
 
-        exit(1);
+        perror("Erreur mmap");
+
+        exit(EXIT_FAILURE);
 
     }
 
-
-
-    // Attendre que le thread de réception se termine
-
-    pthread_join(thread_reception, NULL);
+    memset(tab_global, 0, MAX_RAND * sizeof(int));
 
 
 
-    // Afficher toutes les valeurs générées et reçues
+    sem_t *sem = sem_open("semaphore", O_CREAT | O_EXCL, 0644, 1);
 
-    printf("\nValeurs générées par le serveur :\n");
-
-    for (int i = 0; i < NOMBRE_DE_PROCESSUS; i++) {
-
-        printf("%d ", data.valeurs_generees[i]);
-
-    }
-
-    printf("\n");
+    sem_unlink("semaphore");
 
 
 
-    printf("Valeurs reçues du client :\n");
+    printf("[Serveur] Création des processus enfants pour générer des données...\n");
 
-    for (int i = 0; i < NOMBRE_DE_PROCESSUS; i++) {
 
-        if (data.valeurs_reçues[i] != 0) {
 
-            printf("%d ", data.valeurs_reçues[i]);
+    // Création des processus enfants du serveur pour générer des données
+
+  for (int i = 0; i < MAX_FILS; i++) {
+
+    if (fork() == 0) {
+
+        printf("[Processus Serveur %d] Génération des nombres aléatoires...\n", i + 1);
+
+
+
+        // Initialisation de la graine pour rand() avec srand
+
+        srand(time(NULL) + getpid());  // Utilisation de time(NULL) et getpid() pour garantir une graine unique par processus
+
+
+
+        int *tab_local = calloc(MAX_RAND, sizeof(int));
+
+
+
+        for (int j = 0; j < NVPF; j++) {
+
+            unsigned int random_value = rand() % MAX_RAND;  // Utilisation de rand() pour générer un nombre aléatoire
+
+            tab_local[random_value]++;
 
         }
 
+
+
+        sem_wait(sem);
+
+        for (int k = 0; k < MAX_RAND; k++) {
+
+            tab_global[k] += tab_local[k];
+
+        }
+
+        sem_post(sem);
+
+
+
+        printf("[Processus Serveur %d] Fusion terminée.\n", i + 1);
+
+        free(tab_local);
+
+        munmap(tab_global, MAX_RAND * sizeof(int));
+
+        exit(0);
+
     }
 
-    printf("\n");
+}
 
 
 
-    // Détruire le mutex
-
-    pthread_mutex_destroy(&data.mutex);
 
 
+    for (int i = 0; i < MAX_FILS; i++) {
+
+        wait(NULL);
+
+    }
+
+
+
+    printf("[Serveur] Tous les processus enfants ont terminé la génération des données.\n");
+
+
+
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+
+        perror("Erreur de création du socket");
+
+        exit(EXIT_FAILURE);
+
+    }
+
+
+
+    address.sin_family = AF_INET;
+
+    address.sin_addr.s_addr = INADDR_ANY;
+
+    address.sin_port = htons(PORT);
+
+
+
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+
+        perror("Erreur de liaison (bind)");
+
+        exit(EXIT_FAILURE);
+
+    }
+
+    if (listen(server_fd, 3) < 0) {
+
+        perror("Erreur d'écoute");
+
+        exit(EXIT_FAILURE);
+
+    }
+
+
+
+    printf("[Serveur] En attente de connexion...\n");
+
+
+
+    while (1) {
+
+        if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0) {
+
+            perror("Erreur d'acceptation");
+
+            exit(EXIT_FAILURE);
+
+        }
+
+
+
+        printf("[Serveur] Connexion acceptée. Réception des données...\n");
+
+
+
+        int *tab_recu = malloc(MAX_RAND * sizeof(int));
+
+        recv(new_socket, tab_recu, MAX_RAND * sizeof(int), 0);
+
+        printf("[Serveur] Données reçues du client.\n");
+
+
+
+        // Affichage des 10 premières valeurs du tableau reçu
+
+        printf("[Serveur] Échantillon des 10 premières valeurs du tableau reçu :\n");
+
+        for (int i = 0; i < 10; i++) {
+
+            printf("tab_recu[%d] = %d\n", i, tab_recu[i]);
+
+        }
+
+
+
+        printf("[Serveur] Fusion des données du client avec le tableau global...\n");
+
+        sem_wait(sem);
+
+        for (int i = 0; i < MAX_RAND; i++) {
+
+            tab_global[i] += tab_recu[i];
+
+        }
+
+        sem_post(sem);
+
+        printf("[Serveur] Fusion terminée.\n");
+
+
+
+        // Affichage des 10 premières valeurs du tableau global après fusion
+
+        printf("[Serveur] Échantillon des 10 premières valeurs du tableau global après fusion :\n");
+
+        for (int i = 0; i < 10; i++) {
+
+            printf("tab_global[%d] = %d\n", i, tab_global[i]);
+
+        }
+
+
+
+        free(tab_recu);
+
+        close(new_socket);
+
+
+
+        coef_variation(tab_global);
+
+    }
+
+
+
+    close(server_fd);
+
+    munmap(tab_global, MAX_RAND * sizeof(int));
 
     return 0;
 
 }
-
