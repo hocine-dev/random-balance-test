@@ -18,252 +18,205 @@
 
 #include <sys/wait.h>
 
+#define MILLIARD 1000000000LL // definire la constante  1 milliard
+#define MILLION 1000000LL     // definire la constante  1 million
 
+#define MAX_RAND MILLIARD // Valeur maximale pour les nombres aléatoires
 
-#define MAX_RAND 32767
+#define MAX_FILS 6 // Nombre de processus enfants
 
-#define MAX_FILS 6  // Nombre de processus enfants
+#define PORT 8080 // Port pour la connexion réseau
 
-#define PORT 8080
+#define NOMBRE_DE_VALEURS (1 * MILLIARD) // Nombre total de valeurs à générer
 
-#define MILLIARD 1000000000LL
+#define NVPF (NOMBRE_DE_VALEURS / MAX_FILS) // Nombre total de valeurs générées par les processus fils
 
-#define NOMBRE_DE_VALEURS (600 * MILLIARD)  // Nombre totale de valeurs a generé
+#define CHUNKSIZE MILLION // Taille du chunk pour la fusion des données
 
-#define NVPF  (0.01 * MILLIARD)  // Nombre totale de valeurs a generé par les processus fils
+// Fonction pour envoyer les données au serveur
 
-#define CHUNKSIZE 50000000 // Taille du chunk
-
-
-
-// Générateur Linéaire Congruent (GLC)
-
-unsigned int glc(unsigned int seed) {
-
-    static unsigned int a = 1664525, c = 1013904223, m = 0xFFFFFFFF;
-
-    return (a * seed + c) % m;
-
-}
-
-
-
-void envoyer_donnees(int *tab) {
+void envoyer_donnees(int *tab)
+{
 
     int sock = 0;
 
     struct sockaddr_in serv_addr;
 
+    // Création du socket
 
-
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    {
 
         perror("Erreur de création du socket");
 
         exit(EXIT_FAILURE);
-
     }
+
+    // Configuration de l'adresse du serveur
 
     serv_addr.sin_family = AF_INET;
 
     serv_addr.sin_port = htons(PORT);
 
+    // Conversion de l'adresse IP en format binaire
 
-
-    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
+    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0)
+    {
 
         perror("Adresse non valide");
 
         exit(EXIT_FAILURE);
-
     }
 
+    // Connexion au serveur
 
-
-    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+    {
 
         perror("Erreur de connexion");
 
         exit(EXIT_FAILURE);
-
     }
 
+    // Envoi des données au serveur
 
-
-    printf("[Client] Envoi du tableau global au serveur...\n");
-
-    send(sock, tab, MAX_RAND * sizeof(int), 0);
+    send(sock, tab, NOMBRE_DE_VALEURS * sizeof(int), 0);
 
     printf("[Client] Données envoyées au serveur avec succès.\n");
 
-    close(sock);
+    // Fermeture du socket
 
+    close(sock);
 }
 
-
-
-int main() {
+int main()
+{
 
     printf("[Client] Début du programme client...\n");
 
+    // Allocation de mémoire partagée pour le tableau global
 
+    int *tab_global = mmap(NULL, NOMBRE_DE_VALEURS * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
-    int *tab_global = mmap(NULL, MAX_RAND * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (tab_global == MAP_FAILED)
+    {
 
-    if (tab_global == MAP_FAILED) {
+        // Gestion de l'erreur si l'allocation échoue
 
         perror("Erreur mmap");
 
         exit(EXIT_FAILURE);
-
     }
 
-    memset(tab_global, 0, MAX_RAND * sizeof(int));
+    // Initialisation du tableau global à zéro
 
+    memset(tab_global, 0, NOMBRE_DE_VALEURS * sizeof(int));
 
+    // Création d'un tableau de sémaphores pour chaque portion du tableau global
 
-    sem_t *sem = sem_open("semaphore", O_CREAT | O_EXCL, 0644, 1);
+    sem_t *sems[MAX_FILS];
 
-    sem_unlink("semaphore");
+    for (int i = 0; i < MAX_FILS; i++)
+    {
 
+        char sem_name[20];
 
+        sprintf(sem_name, "semaphore_%d", i); // Génération d'un nom unique pour chaque sémaphore
+
+        sems[i] = sem_open(sem_name, O_CREAT | O_EXCL, 0644, 1); // Création du sémaphore
+
+        sem_unlink(sem_name); // Suppression du nom du sémaphore pour éviter les conflits futurs
+    }
 
     printf("[Client] Création des processus enfants...\n");
 
+    // Diviser l'indice de tableau entre les processus fils
 
+    int chunk_size = NOMBRE_DE_VALEURS / MAX_FILS;
 
-    for (int i = 0; i < MAX_FILS; i++) {
+    for (int i = 0; i < MAX_FILS; i++)
+    {
 
-    if (fork() == 0) {
+        if (fork() == 0)
+        {
 
-        printf("[Processus Fils %d] Génération des nombres aléatoires...\n", i + 1);
+            printf("[Processus Fils %d] Génération des nombres aléatoires...\n", i + 1);
 
-        
+            // Initialisation de la graine pour rand()
 
-        // Initialisation de la graine pour rand()
+            srand(time(NULL) + getpid());
 
-        srand(time(NULL) + getpid());  // Utilisation de time(NULL) et getpid() pour garantir une graine unique par processus
+            // Allocation de mémoire pour le tableau local
 
+            int *tab_local = calloc(NVPF, sizeof(int));
 
+            // Calculer la portion spécifique du tableau que ce processus va traiter
 
-        int *tab_local = calloc(MAX_RAND, sizeof(int));
+            int start_idx = i * chunk_size;
 
-        int chunk_count = 0;  // Compteur de valeurs générées
+            // Génération des nombres aléatoires et incrémentation du tableau local
 
+            for (int j = 0; j < NVPF; j++)
+            {
 
+                unsigned int random_value = rand() % MAX_RAND; // Utilisation de rand() pour générer un nombre aléatoire
 
-        for (int j = 0; j < NVPF; j++) {
+                tab_local[j] = random_value;
+            }
 
-            unsigned int random_value = rand() % MAX_RAND;  // Utilisation de rand() pour générer un nombre aléatoire
+            // Gestion de la fusion des chunks
 
-            tab_local[random_value]++;
+            for (int chunk = 0; chunk < (NVPF / CHUNKSIZE); chunk++)
+            {
 
-            chunk_count++;
+                // Attente du sémaphore du chunk
 
+                sem_wait(sems[i]);
 
+                // Fusion du chunk
 
-            // Fusionner lorsque le chunk de 50 millions est atteint
+                for (int k = chunk * CHUNKSIZE; k < (chunk + 1) * CHUNKSIZE && k < NVPF; k++)
+                {
 
-            if (chunk_count >= CHUNKSIZE) {
-
-                printf("[Processus Fils %d] Fusion après %d valeurs...\n", i + 1, chunk_count);
-
-                sem_wait(sem);
-
-                for (int k = 0; k < MAX_RAND; k++) {
-
-                    tab_global[k] += tab_local[k];
-
+                    tab_global[start_idx + k] = tab_local[k];
                 }
 
-                sem_post(sem);
+                // Libération du sémaphore du chunk
 
-
-
-                // Réinitialiser le tableau local pour le prochain chunk
-
-                memset(tab_local, 0, MAX_RAND * sizeof(int));
-
-                chunk_count = 0;  // Réinitialiser le compteur de valeurs générées
-
+                sem_post(sems[i]);
             }
 
+            printf("[Processus Fils %d] Fusion terminée.\n", i + 1);
+
+            // Libération de la mémoire allouée pour le tableau local
+
+            free(tab_local);
+
+            // Terminer le processus fils
+
+            exit(0);
         }
-
-
-
-        // Fusion finale pour les valeurs restantes
-
-        if (chunk_count > 0) {
-
-            printf("[Processus Fils %d] Fusion finale après %d valeurs...\n", i + 1, chunk_count);
-
-            sem_wait(sem);
-
-            for (int k = 0; k < MAX_RAND; k++) {
-
-                tab_global[k] += tab_local[k];
-
-            }
-
-            sem_post(sem);
-
-        }
-
-
-
-        // Affichage d'un échantillon des 10 premières valeurs du tableau local
-
-        printf("[Processus Fils %d] Échantillon des 10 premières valeurs du tableau local :\n", i + 1);
-
-        for (int k = 0; k < 10; k++) {
-
-            printf("tab_local[%d] = %d\n", k, tab_local[k]);
-
-        }
-
-
-
-        printf("[Processus Fils %d] Fusion terminée.\n", i + 1);
-
-        free(tab_local);
-
-        munmap(tab_global, MAX_RAND * sizeof(int));
-
-        exit(0);
-
     }
 
-}
+    // Attendre que tous les processus enfants terminent
 
-
-
-    for (int i = 0; i < MAX_FILS; i++) {
+    for (int i = 0; i < MAX_FILS; i++)
+    {
 
         wait(NULL);
-
     }
 
-    
+    printf("[Client] Tous les processus enfants ont terminé. Envoi du tableau global au serveur...\n");
 
-    printf("[Client] Échantillon des 10 premières valeurs du tableau global après fusion :\n");
-
-    for (int k = 0; k < 10; k++) {
-
-    printf("tab_global[%d] = %d\n", k, tab_global[k]);
-
-    }
-
-
-
-    printf("[Client] Tous les processus enfants ont terminé. Envoi des données...\n");
+    // Envoyer les données au serveur
 
     envoyer_donnees(tab_global);
 
-    munmap(tab_global, MAX_RAND * sizeof(int));
+    // Détacher et libérer la mémoire partagée
+
+    munmap(tab_global, NOMBRE_DE_VALEURS * sizeof(int));
 
     printf("[Client] Fin du programme client.\n");
 
     return 0;
-
 }
