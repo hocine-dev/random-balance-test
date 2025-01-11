@@ -4,15 +4,15 @@
 
 #include <unistd.h>
 
-#include <string.h>
-
-#include <sys/socket.h>
-
 #include <arpa/inet.h>
 
-#include <sys/shm.h>
+#include <string.h>
 
-#include <sys/sem.h>
+#include <sys/mman.h>
+
+#include <semaphore.h>
+
+#include <fcntl.h>
 
 #include <time.h>
 
@@ -20,59 +20,83 @@
 
 
 
-#define NOMBRE_DE_PROCESSUS 6
+#define MAX_RAND 32767
 
-#define SERVER_IP "10.0.2.15"
+#define MAX_FILS 6  // Nombre de processus enfants
 
-#define PORT 12345
+#define PORT 8080
 
-#define MEM_KEY 12345   // Clé de la mémoire partagée
+#define MILLIARD 1000000000LL
 
-#define SEM_KEY 12346   // Clé du sémaphore
+#define NOMBRE_DE_VALEURS (600 * MILLIARD)  // Nombre totale de valeurs a generé
 
+#define NVPF  (0.01 * MILLIARD)  // Nombre totale de valeurs a generé par les processus fils
 
-
-// Structure pour la mémoire partagée
-
-struct shared_data {
-
-    int values[NOMBRE_DE_PROCESSUS];
-
-};
+#define CHUNKSIZE 50000000 // Taille du chunk
 
 
 
-// Fonction pour initialiser le sémaphore
+// Générateur Linéaire Congruent (GLC)
 
-void init_semaphore(int sem_id) {
+unsigned int glc(unsigned int seed) {
 
-    for (int i = 0; i < NOMBRE_DE_PROCESSUS; i++) {
+    static unsigned int a = 1664525, c = 1013904223, m = 0xFFFFFFFF;
 
-        semctl(sem_id, i, SETVAL, 1); // Initialisation à 1 (sémaphore disponible)
+    return (a * seed + c) % m;
+
+}
+
+
+
+void envoyer_donnees(int *tab) {
+
+    int sock = 0;
+
+    struct sockaddr_in serv_addr;
+
+
+
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+
+        perror("Erreur de création du socket");
+
+        exit(EXIT_FAILURE);
 
     }
 
-}
+    serv_addr.sin_family = AF_INET;
+
+    serv_addr.sin_port = htons(PORT);
 
 
 
-// Fonction pour manipuler un sémaphore
+    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
 
-void P(int sem_id, int index) {
+        perror("Adresse non valide");
 
-    struct sembuf sem_op = { index, -1, 0 }; // P (down) operation
+        exit(EXIT_FAILURE);
 
-    semop(sem_id, &sem_op, 1);
-
-}
+    }
 
 
 
-void V(int sem_id, int index) {
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
 
-    struct sembuf sem_op = { index, 1, 0 }; // V (up) operation
+        perror("Erreur de connexion");
 
-    semop(sem_id, &sem_op, 1);
+        exit(EXIT_FAILURE);
+
+    }
+
+
+
+    printf("[Client] Envoi du tableau global au serveur...\n");
+
+    send(sock, tab, MAX_RAND * sizeof(int), 0);
+
+    printf("[Client] Données envoyées au serveur avec succès.\n");
+
+    close(sock);
 
 }
 
@@ -80,219 +104,166 @@ void V(int sem_id, int index) {
 
 int main() {
 
-    pid_t pid;
-
-    int sock;
-
-    struct sockaddr_in server_addr;
+    printf("[Client] Début du programme client...\n");
 
 
 
-    // Création du socket
+    int *tab_global = mmap(NULL, MAX_RAND * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+    if (tab_global == MAP_FAILED) {
 
-        perror("Échec de la création du socket");
+        perror("Erreur mmap");
 
-        exit(1);
+        exit(EXIT_FAILURE);
 
     }
 
+    memset(tab_global, 0, MAX_RAND * sizeof(int));
 
 
-    // Configuration de l'adresse du serveur
 
-    server_addr.sin_family = AF_INET;
+    sem_t *sem = sem_open("semaphore", O_CREAT | O_EXCL, 0644, 1);
 
-    server_addr.sin_port = htons(PORT);
+    sem_unlink("semaphore");
 
-    if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0) {
 
-        perror("Adresse IP invalide");
 
-        exit(1);
+    printf("[Client] Création des processus enfants...\n");
 
-    }
 
 
+    for (int i = 0; i < MAX_FILS; i++) {
 
-    // Connexion au serveur
+    if (fork() == 0) {
 
-    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        printf("[Processus Fils %d] Génération des nombres aléatoires...\n", i + 1);
 
-        perror("Échec de la connexion au serveur");
+        
 
-        exit(1);
+        // Initialisation de la graine pour rand()
 
-    }
+        srand(time(NULL) + getpid());  // Utilisation de time(NULL) et getpid() pour garantir une graine unique par processus
 
 
 
-    // Création de la mémoire partagée
+        int *tab_local = calloc(MAX_RAND, sizeof(int));
 
-    int shmid;
+        int chunk_count = 0;  // Compteur de valeurs générées
 
-    struct shared_data *shm_data;
 
-    if ((shmid = shmget(MEM_KEY, sizeof(struct shared_data), IPC_CREAT | 0666)) < 0) {
 
-        perror("Erreur de création de la mémoire partagée");
+        for (int j = 0; j < NVPF; j++) {
 
-        exit(1);
+            unsigned int random_value = rand() % MAX_RAND;  // Utilisation de rand() pour générer un nombre aléatoire
 
-    }
+            tab_local[random_value]++;
 
+            chunk_count++;
 
 
-    // Attachement de la mémoire partagée
 
-    if ((shm_data = (struct shared_data *)shmat(shmid, NULL, 0)) == (void *)-1) {
+            // Fusionner lorsque le chunk de 50 millions est atteint
 
-        perror("Erreur d'attachement de la mémoire partagée");
+            if (chunk_count >= CHUNKSIZE) {
 
-        exit(1);
+                printf("[Processus Fils %d] Fusion après %d valeurs...\n", i + 1, chunk_count);
 
-    }
+                sem_wait(sem);
 
+                for (int k = 0; k < MAX_RAND; k++) {
 
+                    tab_global[k] += tab_local[k];
 
-    // Création du sémaphore
+                }
 
-    int semid;
+                sem_post(sem);
 
-    if ((semid = semget(SEM_KEY, NOMBRE_DE_PROCESSUS, IPC_CREAT | 0666)) < 0) {
 
-        perror("Erreur de création du sémaphore");
 
-        exit(1);
+                // Réinitialiser le tableau local pour le prochain chunk
 
-    }
+                memset(tab_local, 0, MAX_RAND * sizeof(int));
 
-
-
-    // Initialisation du sémaphore
-
-    init_semaphore(semid);
-
-
-
-    // Création des processus enfants
-
-    for (int i = 0; i < NOMBRE_DE_PROCESSUS; i++) {
-
-        pid = fork();
-
-        if (pid < 0) {
-
-            perror("Échec de la création du processus");
-
-            exit(1);
-
-        } else if (pid == 0) {
-
-            // Processus enfant
-
-
-
-            // Initialisation du générateur de nombres aléatoires avec une graine spécifique
-
-            srand(time(NULL) + getpid());
-
-
-
-            // Génération de la valeur aléatoire
-
-            int valeur_aleatoire = rand() % 100;  // Valeur entre 0 et 99
-
-
-
-            // Attente avant d'accéder à la mémoire partagée
-
-            P(semid, i);  // Acquérir le sémaphore
-
-
-
-            // Stockage de la valeur générée dans la mémoire partagée
-
-            shm_data->values[i] = valeur_aleatoire;
-
-
-
-            // Libération du sémaphore
-
-            V(semid, i);  // Libérer le sémaphore
-
-
-
-            // Envoi de la valeur au serveur
-
-            char buffer[256];
-
-            snprintf(buffer, sizeof(buffer), "%d", valeur_aleatoire);
-
-            if (send(sock, buffer, strlen(buffer), 0) == -1) {
-
-                perror("Échec de l'envoi de la valeur");
-
-                exit(1);
+                chunk_count = 0;  // Réinitialiser le compteur de valeurs générées
 
             }
 
-
-
-            printf("Processus enfant %d (PID: %d) a généré et envoyé la valeur : %d\n", i, getpid(), valeur_aleatoire);
-
-
-
-            // Attente de 1 seconde avant le prochain envoi
-
-            sleep(1);
+        }
 
 
 
-            exit(0);
+        // Fusion finale pour les valeurs restantes
+
+        if (chunk_count > 0) {
+
+            printf("[Processus Fils %d] Fusion finale après %d valeurs...\n", i + 1, chunk_count);
+
+            sem_wait(sem);
+
+            for (int k = 0; k < MAX_RAND; k++) {
+
+                tab_global[k] += tab_local[k];
+
+            }
+
+            sem_post(sem);
 
         }
 
+
+
+        // Affichage d'un échantillon des 10 premières valeurs du tableau local
+
+        printf("[Processus Fils %d] Échantillon des 10 premières valeurs du tableau local :\n", i + 1);
+
+        for (int k = 0; k < 10; k++) {
+
+            printf("tab_local[%d] = %d\n", k, tab_local[k]);
+
+        }
+
+
+
+        printf("[Processus Fils %d] Fusion terminée.\n", i + 1);
+
+        free(tab_local);
+
+        munmap(tab_global, MAX_RAND * sizeof(int));
+
+        exit(0);
+
     }
 
+}
 
 
-    // Attente de la fin des processus enfants
 
-    for (int i = 0; i < NOMBRE_DE_PROCESSUS; i++) {
+    for (int i = 0; i < MAX_FILS; i++) {
 
         wait(NULL);
 
     }
 
+    
 
+    printf("[Client] Échantillon des 10 premières valeurs du tableau global après fusion :\n");
 
-    // Affichage des valeurs générées par les processus enfants
+    for (int k = 0; k < 10; k++) {
 
-    printf("Valeurs générées par les processus enfants (mémoire partagée) :\n");
-
-    for (int i = 0; i < NOMBRE_DE_PROCESSUS; i++) {
-
-        printf("Valeur générée par l'enfant %d : %d\n", i, shm_data->values[i]);
+    printf("tab_global[%d] = %d\n", k, tab_global[k]);
 
     }
 
 
 
-    // Fermeture des sockets et nettoyage
+    printf("[Client] Tous les processus enfants ont terminé. Envoi des données...\n");
 
-    close(sock);
+    envoyer_donnees(tab_global);
 
-    shmdt(shm_data);
+    munmap(tab_global, MAX_RAND * sizeof(int));
 
-    shmctl(shmid, IPC_RMID, NULL);
-
-    semctl(semid, 0, IPC_RMID);
-
-
+    printf("[Client] Fin du programme client.\n");
 
     return 0;
 
 }
-
